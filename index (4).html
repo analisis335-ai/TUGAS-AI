@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pengenal Gambar – Teachable Machine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#e9efee; --panel:#ffffff; --ink:#13232b; --muted:#5b6b72;
+    --line:#c9d6d4; --accent:#0b5fa5; --accent-ink:#ffffff; --bar:#0b5fa5; --bar-top:#d98a1c;
+    --err:#a4261b; --err-bg:#fbe9e6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1a1f; --panel:#17262d; --ink:#e6eeee; --muted:#93a5ab; --line:#2c3f47;
+      --accent:#5aa9e6; --accent-ink:#0b1a22; --bar:#5aa9e6; --bar-top:#f0b04a; --err:#ff9d92; --err-bg:#3a1d1a; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  h1,h2{font-family:"Bricolage Grotesque",system-ui,sans-serif;margin:0;line-height:1.1}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 20px 56px}
+  header{margin-bottom:24px}
+  h1{font-size:clamp(28px,5vw,44px);font-weight:700}
+  header p{color:var(--muted);margin:10px 0 0;max-width:60ch}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media (max-width:760px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  h2{font-size:20px;font-weight:500;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  button{font:inherit;font-weight:600;padding:10px 16px;border-radius:8px;border:1px solid var(--accent);
+    background:var(--accent);color:var(--accent-ink);cursor:pointer}
+  button.ghost{background:transparent;color:var(--accent)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  :focus-visible{outline:3px solid var(--bar-top);outline-offset:2px}
+  .tabs{display:flex;gap:8px;margin-bottom:14px}
+  .tabs button{background:transparent;color:var(--ink);border-color:var(--line)}
+  .tabs button[aria-selected=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .stage{aspect-ratio:1/1;width:100%;background:var(--bg);border:1px dashed var(--line);border-radius:10px;
+    display:grid;place-items:center;overflow:hidden;color:var(--muted);text-align:center;padding:10px}
+  .stage canvas,.stage img{width:100%;height:100%;object-fit:contain;display:block}
+  .top{margin-bottom:16px}
+  .top .name{font-family:"Bricolage Grotesque",sans-serif;font-size:clamp(28px,5vw,40px);font-weight:700;overflow-wrap:anywhere}
+  .top .pct{color:var(--muted)}
+  .bar{margin:10px 0}
+  .bar .meta{display:flex;justify-content:space-between;font-size:14px;gap:10px}
+  .track{height:10px;background:var(--bg);border-radius:99px;overflow:hidden;margin-top:4px}
+  .fill{height:100%;width:0;background:var(--bar);border-radius:99px;transition:width .15s}
+  .bar.best .fill{background:var(--bar-top)}
+  .status{font-size:14px;color:var(--muted);margin-top:14px}
+  .error{background:var(--err-bg);color:var(--err);padding:10px 12px;border-radius:8px;margin-top:12px;display:none;font-size:14px;max-width:70ch}
+  .empty{color:var(--muted)}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion:reduce){.fill{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Pengenal Gambar</h1>
+    <p>Arahkan kamera atau unggah foto, lalu lihat kelas apa yang dikenali oleh model Teachable Machine kami.</p>
+    <div class="status" id="modelStatus">Memuat model…</div>
+    <div class="error" id="error" role="alert"></div>
+  </header>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabCam" aria-selected="true">Kamera</button>
+        <button role="tab" id="tabUp" aria-selected="false">Unggah gambar</button>
+      </div>
+
+      <div id="camView">
+        <div class="stage" id="camStage">Kamera belum aktif</div>
+        <div class="row">
+          <button id="camStart" disabled>Nyalakan kamera</button>
+          <button id="camStop" class="ghost" disabled>Matikan kamera</button>
+        </div>
+      </div>
+
+      <div id="upView" hidden>
+        <div class="stage" id="upStage">Belum ada gambar</div>
+        <div class="row">
+          <input id="file" type="file" accept="image/*" hidden>
+          <button id="pick" disabled>Pilih gambar</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-live="polite">
+      <h2>Hasil prediksi</h2>
+      <div class="top" id="top"><span class="empty">Menunggu model siap…</span></div>
+      <div id="bars"></div>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.3/dist/teachablemachine-image.min.js"></script>
+<script>
+
+const $ = id => document.getElementById(id);
+let model = null, webcam = null, rafId = null;
+
+function showError(msg){
+  const e = $("error");
+  e.textContent = msg || "";
+  e.style.display = msg ? "block" : "none";
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ---------- memuat model dari file di folder yang sama ----------
+   Butuh: model.json, metadata.json, weights.bin (satu folder dengan index.html) */
+async function loadModel(){
+  if(location.protocol === "file:"){
+    $("modelStatus").textContent = "Model belum dimuat.";
+    showError("Halaman dibuka langsung dari file, sehingga browser memblokir pembacaan model.json. Buka lewat GitHub Pages atau server lokal (mis. Live Server di VS Code).");
+    return;
+  }
+  if(typeof tmImage === "undefined"){
+    $("modelStatus").textContent = "Model belum dimuat.";
+    showError("Library Teachable Machine gagal dimuat. Periksa koneksi internet lalu muat ulang halaman.");
+    return;
+  }
+  try{
+    model = await tmImage.load(
+      new URL("model.json", location.href).href,
+      new URL("metadata.json", location.href).href
+    );
+    const labels = model.getClassLabels();
+    renderBars(labels.map(l => ({className:l, probability:0})), false);
+    $("top").innerHTML = '<span class="empty">Model siap. Nyalakan kamera atau unggah gambar.</span>';
+    $("modelStatus").textContent = "Model siap: " + labels.length + " kelas (" + labels.join(", ") + ").";
+    $("camStart").disabled = false;
+    $("pick").disabled = false;
+  }catch(err){
+    console.error(err);
+    $("modelStatus").textContent = "Model belum dimuat.";
+    showError("Model gagal dimuat. Pastikan model.json, metadata.json, dan weights.bin ada di folder yang sama dengan index.html dan namanya persis seperti itu.");
+  }
+}
+
+/* ---------- tampilan hasil ---------- */
+function renderBars(preds, highlight = true){
+  const best = highlight ? preds.reduce((a,b) => b.probability > a.probability ? b : a) : null;
+  $("bars").innerHTML = preds.map(p => {
+    const pct = p.probability * 100;
+    const isBest = best && p === best && pct > 0;
+    return '<div class="bar' + (isBest ? ' best' : '') + '">' +
+      '<div class="meta"><span>' + escapeHtml(p.className) + '</span><span>' + pct.toFixed(1) + '%</span></div>' +
+      '<div class="track"><div class="fill" style="width:' + pct.toFixed(1) + '%"></div></div></div>';
+  }).join("");
+  if(best){
+    $("top").innerHTML = '<div class="name">' + escapeHtml(best.className) + '</div>' +
+      '<div class="pct">Keyakinan ' + (best.probability * 100).toFixed(1) + '%</div>';
+  }
+}
+
+/* ---------- kamera ---------- */
+async function startCamera(){
+  showError("");
+  if(!model) return;
+  $("camStart").disabled = true;
+  try{
+    webcam = new tmImage.Webcam(400, 400, true);
+    await webcam.setup();
+    await webcam.play();
+    const stage = $("camStage");
+    stage.textContent = "";
+    stage.appendChild(webcam.canvas);
+    $("camStop").disabled = false;
+    loop();
+  }catch(err){
+    console.error(err);
+    webcam = null;
+    $("camStart").disabled = false;
+    showError("Kamera tidak bisa diakses. Izinkan akses kamera di browser, dan buka halaman lewat https atau localhost.");
+  }
+}
+async function loop(){
+  if(!webcam) return;
+  webcam.update();
+  renderBars(await model.predict(webcam.canvas));
+  rafId = requestAnimationFrame(loop);
+}
+function stopCamera(){
+  if(rafId) cancelAnimationFrame(rafId);
+  rafId = null;
+  if(webcam){ webcam.stop(); webcam = null; }
+  $("camStage").textContent = "Kamera belum aktif";
+  $("camStop").disabled = true;
+  if(model) $("camStart").disabled = false;
+}
+$("camStart").addEventListener("click", startCamera);
+$("camStop").addEventListener("click", stopCamera);
+
+/* ---------- unggah gambar ---------- */
+$("pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if(!f || !model) return;
+  const img = new Image();
+  img.onload = async () => {
+    const stage = $("upStage");
+    stage.textContent = "";
+    stage.appendChild(img);
+    renderBars(await model.predict(img));
+  };
+  img.onerror = () => showError("File tidak bisa dibaca sebagai gambar.");
+  img.src = URL.createObjectURL(f);
+});
+
+/* ---------- tab ---------- */
+function selectTab(cam){
+  $("tabCam").setAttribute("aria-selected", cam);
+  $("tabUp").setAttribute("aria-selected", !cam);
+  $("camView").hidden = !cam;
+  $("upView").hidden = cam;
+  if(!cam) stopCamera();
+}
+$("tabCam").addEventListener("click", () => selectTab(true));
+$("tabUp").addEventListener("click", () => selectTab(false));
+
+window.addEventListener("load", loadModel);
+</script>
+</body>
+</html>
